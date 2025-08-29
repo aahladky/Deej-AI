@@ -11,6 +11,7 @@ import spotipy.util as util
 import random
 import requests
 import webbrowser
+import gdown
 
 # If you want to be able to load your playlists into Spotify
 # you will need to get credentials from https://developer.spotify.com/dashboard/applications
@@ -23,33 +24,12 @@ redirect_uri = 'https://www.attentioncoach.es/'
 epsilon_distance = 0.001
 
 
-def download_file_from_google_drive(id, destination):
+def download_file_from_google_drive(file_id, destination):
     if os.path.isfile(destination):
-        return None
-    print(f'Downloading {destination}')
-    URL = "https://docs.google.com/uc?export=download"
-    session = requests.Session()
-    response = session.get(URL, params={'id': id}, stream=True)
-    token = get_confirm_token(response)
-    if token:
-        params = {'id': id, 'confirm': token}
-        response = session.get(URL, params=params, stream=True)
-    save_response_content(response, destination)
-
-
-def get_confirm_token(response):
-    for key, value in response.cookies.items():
-        if key.startswith('download_warning'):
-            return value
-    return None
-
-
-def save_response_content(response, destination):
-    CHUNK_SIZE = 32768
-    with open(destination, "wb") as f:
-        for chunk in response.iter_content(CHUNK_SIZE):
-            if chunk:  # filter out keep-alive new chunks
-                f.write(chunk)
+        return  # already downloaded
+    url = f"https://drive.google.com/uc?id={file_id}"
+    print(f"Downloading {destination} ...")
+    gdown.download(url, destination, quiet=False)
 
 
 def add_track_to_playlist(sp, username, playlist_id, track_id, replace=False):

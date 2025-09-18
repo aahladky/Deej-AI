@@ -16,3 +16,4 @@ tensorflow-macos==2.13.0; sys_platform == 'darwin'
 tensorflow-metal==2.13.0; sys_platform == 'darwin'
 numba
 markupsafe==2.0.1
+gdown

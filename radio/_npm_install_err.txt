@@ -1,0 +1,60 @@
+npm warn skipping integrity check for git dependency ssh://git@github.com/electron/node-gyp.git
+npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.get@4.4.2: This package is deprecated. Use the optional chaining (?.) operator instead.
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+npm warn deprecated @npmcli/move-file@2.0.1: This functionality has been moved to @npmcli/fs
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated @humanwhocodes/config-array@0.13.0: Use @eslint/config-array instead
+npm warn deprecated @humanwhocodes/object-schema@2.0.3: Use @eslint/object-schema instead
+npm warn deprecated @babel/plugin-proposal-private-methods@7.18.6: This proposal has been merged to the ECMAScript standard and thus this plugin is no longer maintained. Please use @babel/plugin-transform-private-methods instead.
+npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer supported
+npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer supported
+npm warn gitignore-fallback No .npmignore file found, using .gitignore for file exclusion. Consider creating a .npmignore file to explicitly control published files.
+npm warn deprecated eslint@8.57.1: This version is no longer supported. Please see https://eslint.org/version-support for other options.
+npm warn cleanup Failed to remove some directories [
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@humanfs\\node',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\aahla\Downloads\SpotifySkipTracker-master\SpotifySkipTracker-master\node_modules\@humanfs\node\node_modules'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@humanfs\\node\\node_modules'
+npm warn cleanup     }
+npm warn cleanup   ],
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\aahla\Downloads\SpotifySkipTracker-master\SpotifySkipTracker-master\node_modules\@asamuzakjp\css-color\node_modules'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@asamuzakjp\\css-color\\node_modules'
+npm warn cleanup     }
+npm warn cleanup   ],
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@cspotcode',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\aahla\Downloads\SpotifySkipTracker-master\SpotifySkipTracker-master\node_modules\@cspotcode\source-map-support\node_modules\@jridgewell'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@cspotcode\\source-map-support\\node_modules\\@jridgewell'
+npm warn cleanup     }
+npm warn cleanup   ],
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@listr2',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\aahla\Downloads\SpotifySkipTracker-master\SpotifySkipTracker-master\node_modules\@listr2\prompt-adapter-inquirer\node_modules\@inquirer'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\aahla\\Downloads\\SpotifySkipTracker-master\\SpotifySkipTracker-master\\node_modules\\@listr2\\prompt-adapter-inquirer\\node_modules\\@inquirer'
+npm warn cleanup     }
+npm warn cleanup   ]
+npm warn cleanup ]
+npm error code 1
+npm error path C:\Users\aahla\Downloads\SpotifySkipTracker-master\SpotifySkipTracker-master\node_modules\@tailwindcss\oxide
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c node ./scripts/install.js
+npm error 'node' is not recognized as an internal or external command,
+npm error operable program or batch file.
+npm error A complete log of this run can be found in: C:\Users\aahla\AppData\Local\npm-cache\_logs\2026-05-17T18_59_56_974Z-debug-0.log

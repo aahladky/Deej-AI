@@ -38,7 +38,7 @@ if __name__ == '__main__':
     if batch_size == None:
         batch_size = 100
     if epsilon_distance == None:
-        epsilon_distance = 0.001 # should be small, but not too small
+        epsilon_distance = 0.001
     if not os.path.isdir(dump_directory + '/mp3tovecs'):
         os.makedirs(dump_directory + '/mp3tovecs')
     if mp3_directory is not None:
@@ -56,7 +56,7 @@ if __name__ == '__main__':
         slice_size = model.input_shape[2]
         slice_time = slice_size * hop_length / sr
         files = []
-        done = os.listdir(dump_directory)
+        done = set(os.listdir(dump_directory))
         for filename, full_path in walkmp3s(mp3_directory):
             pickle_filename = os.path.splitext(full_path)[0].replace('\\', '_').replace('/', '_').replace(':','_') + '.p'
             if pickle_filename in done:
@@ -66,6 +66,9 @@ if __name__ == '__main__':
         try:
             with tqdm(files, unit="file") as t:
                 for pickle_filename, full_path in t:
+                    # Skip if another worker finished this file since we started
+                    if os.path.exists(dump_directory + '/' + pickle_filename):
+                        continue
                     try:
                         y, sr = librosa.load(full_path, mono=True)
                         if y.shape[0] < slice_size:
@@ -85,7 +88,7 @@ if __name__ == '__main__':
                         print(f'Skipping {full_path}')
                         continue
         except KeyboardInterrupt:
-            t.close() # stop the progress bar from sprawling all over the place after a keyboard interrupt
+            t.close()
             raise
         t.close()
     mp3tovecs_fullpath = dump_directory + f'/mp3tovecs/{mp3tovec_file}.p'
@@ -127,67 +130,66 @@ if __name__ == '__main__':
                 break
             index = indices[batch * batch_size + i]
             mp3s[remaining_mp3s[index]] = unpickled[remaining_mp3s[index]]
+        if not mp3s:
+            continue
+
+        # Build flat list of normalized slice vectors and track which mp3 each belongs to
+        mp3_list = list(mp3s.keys())
         mp3_vecs = []
         mp3_indices = {}
-        for mp3 in mp3s:
+        for mp3 in mp3_list:
             mp3_indices[mp3] = []
             for mp3_vec in mp3s[mp3]:
                 mp3_indices[mp3].append(len(mp3_vecs))
-                mp3_vecs.append(mp3_vec / np.linalg.norm(mp3_vec)) # normalize
+                mp3_vecs.append(mp3_vec / np.linalg.norm(mp3_vec))
         num_mp3_vecs = len(mp3_vecs)
-        # this takes up a lot of memory
-        cos_distances = np.zeros((num_mp3_vecs, num_mp3_vecs), dtype=np.float16)
+        if num_mp3_vecs == 0:
+            continue
+
+        # --- Vectorized cosine distance matrix ---
+        # Vectors are already normalized so dot(a,b) == cosine_similarity(a,b)
         print(f'Precalculating cosine distances')
-        # this needs speeding up
-        try:
-            with tqdm(mp3_vecs, unit="vector") as t:
-                for i, mp3_vec_i in enumerate(t):
-                    for j , mp3_vec_j in enumerate(mp3_vecs):
-                        if i < j:
-                            cos_distances[i, j] = 1 - np.dot(mp3_vec_i, mp3_vec_j)
-            cos_distances = cos_distances + cos_distances.T - np.diag(np.diag(cos_distances)) # Make matrix symmetrical diagonally
-        except KeyboardInterrupt:
-            t.close() # stop the progress bar from sprawling all over the place after a keyboard interrupt
-            raise
-        t.close()        
+        mat = np.array(mp3_vecs, dtype=np.float32)          # (N, embedding_dim)
+        cos_distances = (1.0 - mat @ mat.T).astype(np.float16)  # (N, N)
+        np.fill_diagonal(cos_distances, 0.0)                 # self-distance = 0
+
+        # --- Vectorized IDF weights ---
+        # Build membership matrix M: shape (num_mp3s, num_mp3_vecs)
+        # M[m, v] = True if slice v belongs to mp3 m
         print(f'Calculating IDF weights')
-        idfs = []
-        try:
-            with tqdm(range(num_mp3_vecs), unit="vector") as t:
-                for i in t:
-                    idf = 0
-                    for mp3 in mp3s:
-                        for j in mp3_indices[mp3]:
-                            if cos_distances[i, j] < epsilon_distance:
-                                idf += 1 
-                                break
-                    idfs.append(-np.log(idf / len(mp3s)))
-        except KeyboardInterrupt:
-            t.close() # stop the progress bar from sprawling all over the place after a keyboard interrupt
-            raise
-        t.close()
+        M = np.zeros((len(mp3_list), num_mp3_vecs), dtype=bool)
+        for m_idx, mp3 in enumerate(mp3_list):
+            for v_idx in mp3_indices[mp3]:
+                M[m_idx, v_idx] = True
+
+        close = cos_distances < epsilon_distance             # (N, N) bool
+        # For each query vector i, count how many mp3s have >= 1 slice within epsilon
+        # has_close[m, i] = any slice of mp3 m is close to vector i
+        has_close = M @ close                                # (num_mp3s, N) int
+        idf_counts = (has_close > 0).sum(axis=0)            # (N,) int
+        idf_counts = np.maximum(idf_counts, 1)              # guard against log(0)
+        idfs = -np.log(idf_counts / len(mp3_list))          # (N,) float
+
+        # --- Vectorized TF weights and final mp3 vectors ---
         print(f'Calculating TF weights')
         mp3tovec = {}
-        try:
-            with tqdm(mp3s, unit="mp3") as t:
-                for mp3 in t:
-                    vec = 0
-                    for i in mp3_indices[mp3]:
-                        tf = 0
-                        for j in mp3_indices[mp3]:
-                            if cos_distances[i, j] < epsilon_distance:
-                                tf += 1
-                        vec += mp3_vecs[i] * tf * idfs[i]
-                        mp3tovec[mp3] = vec
-                        mp3tovecs[mp3] = vec
-        except KeyboardInterrupt:
-            t.close() # stop the progress bar from sprawling all over the place after a keyboard interrupt
-            raise
-        t.close()
+        for mp3 in mp3_list:
+            idx = mp3_indices[mp3]
+            if not idx:
+                continue
+            idx = np.array(idx)
+            sub = cos_distances[np.ix_(idx, idx)]           # (k, k) distances within this mp3
+            tf_weights = (sub < epsilon_distance).sum(axis=1)  # (k,) count of close slices
+            vecs  = mat[idx]                                 # (k, embedding_dim)
+            w     = tf_weights * idfs[idx]                  # (k,) combined weight
+            vec   = (vecs * w[:, np.newaxis]).sum(axis=0)   # weighted sum → final embedding
+            mp3tovec[mp3] = vec
+            mp3tovecs[mp3] = vec
+
         pickle.dump(mp3tovec, open(dump_directory + f'/mp3tovecs/{mp3tovec_file}_{start_batch + batch}.p', 'wb'))
-        # free up memory
-        del cos_distances
-        cos_distances = None        
+        del cos_distances, close, has_close, mat
+        cos_distances = None
+
     pickle.dump(mp3tovecs, open(mp3tovecs_fullpath, 'wb'))
     for filename in os.listdir(dump_directory + '/mp3tovecs'):
         if filename[:len(mp3tovec_file)] == mp3tovec_file and filename[len(mp3tovec_file)+1:-2].isdigit():

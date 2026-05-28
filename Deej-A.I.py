@@ -325,7 +325,7 @@ def get_track_info(filename):
     elif filename[-4:].lower() == 'flac':
         audio = FLAC(filename)
         if audio.pictures:
-            for pict in pics:
+            for pict in audio.pictures:
                 if pict.type == 3:
                     im = Image.open(BytesIO(pict.data)).convert('RGB')
                     buff = BytesIO()

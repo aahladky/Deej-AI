@@ -1,0 +1,12 @@
+music.myhouse.fyi {
+
+    # /admin is LAN-only — block any request that didn't come from 192.168.0.x
+    @admin_external {
+        path /admin*
+        not remote_ip 192.168.0.0/24
+    }
+    respond @admin_external "Forbidden" 403
+
+    # Everything else proxies to the DeejAI container on the internal network
+    reverse_proxy deejay:8050
+}

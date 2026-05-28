@@ -1,0 +1,58 @@
+﻿<icecast>
+  <location>localhost</location>
+  <admin>admin@localhost</admin>
+
+  <limits>
+    <clients>10</clients>
+    <sources>2</sources>
+    <queue-size>524288</queue-size>
+    <client-timeout>30</client-timeout>
+    <header-timeout>15</header-timeout>
+    <source-timeout>10</source-timeout>
+    <burst-size>65535</burst-size>
+  </limits>
+
+  <authentication>
+    <source-password>hackme</source-password>
+    <relay-password>hackme</relay-password>
+    <admin-user>admin</admin-user>
+    <admin-password>hackme</admin-password>
+  </authentication>
+
+  <hostname>localhost</hostname>
+
+  <listen-socket>
+    <port>8000</port>
+  </listen-socket>
+
+  <http-headers>
+    <header name="Access-Control-Allow-Origin" value="*" />
+  </http-headers>
+
+  <mount type="normal">
+    <mount-name>/stream</mount-name>
+    <stream-name>DeejAI Radio</stream-name>
+    <stream-description>Sonically-similar music powered by Deej-AI</stream-description>
+  </mount>
+
+  <fileserve>1</fileserve>
+
+  <paths>
+    <basedir>C:\Icecast</basedir>
+    <logdir>C:\Icecast\log</logdir>
+    <webroot>C:\Icecast\web</webroot>
+    <adminroot>C:\Icecast\admin</adminroot>
+    <pidfile>C:\Icecast\icecast.pid</pidfile>
+  </paths>
+
+  <logging>
+    <accesslog>access.log</accesslog>
+    <errorlog>error.log</errorlog>
+    <loglevel>3</loglevel>
+    <logsize>10000</logsize>
+  </logging>
+
+  <security>
+    <chroot>0</chroot>
+  </security>
+</icecast>

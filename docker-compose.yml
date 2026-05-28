@@ -1,0 +1,72 @@
+services:
+
+  deejay:
+    build:
+      context: ./radio
+      dockerfile: Dockerfile
+    container_name: deejay
+    restart: unless-stopped
+    # Host-only (127.0.0.1) publish so /admin + the API are reachable from this
+    # machine's browser for local testing. NOT exposed to the LAN or internet —
+    # external access still goes through caddy at music.myhouse.fyi.
+    ports:
+      - "127.0.0.1:8050:8050"
+    volumes:
+      - type: bind
+        source: E:\Media\Music
+        target: /data/music
+        read_only: true
+      - type: bind
+        source: C:\Dev\DeeJAI\pickles
+        target: /data/pickles
+        read_only: true
+      - type: bind
+        source: C:\Dev\DeeJAI\radio
+        target: /data/radio
+    environment:
+      DEEJAY_PICKLE_PATH:  /data/pickles/mp3tovecs/mp3tovecs.p
+      DEEJAY_DB_PATH:      /data/radio/plays.db
+      DEEJAY_LIBRARY_ROOT: /data/music
+      DEEJAY_API_KEY:      ${DEEJAY_API_KEY}
+    networks:
+      - deejay-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - deejay-net
+    depends_on:
+      - deejay
+
+  ddns:
+    image: favonia/cloudflare-ddns:latest
+    container_name: ddns
+    restart: unless-stopped
+    network_mode: host   # needs host network to detect real public IP
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CF_API_TOKEN:  ${CF_API_TOKEN}
+      DOMAINS:       music.myhouse.fyi
+      PROXIED:       "false"
+      UPDATE_CRON:   "@every 5m"
+      IP6_PROVIDER:  none
+
+networks:
+  deejay-net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -8,7 +8,7 @@ dash_core_components==0.47.0
 dash_html_components==0.16.0
 dash_daq==0.1.4
 pandas
-numpy
+numpy==1.26.4
 dash_html_components
 Pillow
 tensorflow==2.13.0; sys_platform != 'darwin'

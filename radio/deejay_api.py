@@ -164,15 +164,50 @@ def _load_tags(paths: list) -> tuple:
     return meta, index
 
 
+def _load_pickle() -> tuple[list, np.ndarray] | None:
+    """Load and validate the embeddings pickle. Returns (paths, vecs) or None on failure."""
+    if not os.path.exists(PICKLE_PATH):
+        print(f"[pickle] ERROR: file not found: {PICKLE_PATH}")
+        return None
+    try:
+        with open(PICKLE_PATH, 'rb') as f:
+            data = pickle.load(f)
+    except Exception as e:
+        print(f"[pickle] ERROR: failed to load: {e}")
+        return None
+
+    if not isinstance(data, dict) or len(data) == 0:
+        print(f"[pickle] ERROR: expected non-empty dict, got {type(data).__name__} with {len(data) if hasattr(data, '__len__') else '?'} entries")
+        return None
+
+    paths = list(data.keys())
+    values = list(data.values())
+
+    # Validate vector dimensions are consistent
+    try:
+        raw = np.array(values, dtype=np.float32)
+    except (ValueError, TypeError) as e:
+        print(f"[pickle] ERROR: vectors have inconsistent shapes: {e}")
+        return None
+
+    if raw.ndim != 2:
+        print(f"[pickle] ERROR: expected 2D array, got {raw.ndim}D")
+        return None
+
+    print(f"[pickle] OK: {len(paths)} tracks, {raw.shape[1]}D vectors")
+    return paths, raw
+
+
 def _startup():
     global _all_paths, _path_index, _vecs, _track_meta, _tag_index, _scorer, _dj, _ready
 
     print("[startup] Loading embeddings…")
-    with open(PICKLE_PATH, 'rb') as f:
-        data = pickle.load(f)
+    result = _load_pickle()
+    if result is None:
+        print("[startup] FATAL: could not load embeddings pickle — API will not start")
+        return
 
-    paths = list(data.keys())
-    raw   = np.array(list(data.values()), dtype=np.float32)
+    paths, raw = result
 
     # Pre-normalise for cosine similarity via dot product
     norms = np.linalg.norm(raw, axis=1, keepdims=True)
@@ -598,6 +633,31 @@ def admin_action():
             _scorer.refresh()
             return jsonify({'ok': True, 'message': f'✓ Scorer refreshed'})
         return jsonify({'ok': False, 'message': 'Scorer not ready'}), 503
+    if action == 'reload_embeddings':
+        global _all_paths, _path_index, _vecs, _track_meta, _tag_index, _dj, _ready
+        result = _load_pickle()
+        if result is None:
+            return jsonify({'ok': False, 'message': '✗ Pickle reload failed — check server logs'}), 500
+        paths, raw = result
+        norms = np.linalg.norm(raw, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        vecs = raw / norms
+        _all_paths  = paths
+        _path_index = {p: i for i, p in enumerate(paths)}
+        _vecs       = vecs
+        _track_meta, _tag_index = _load_tags(paths)
+        if _scorer:
+            _scorer.refresh()
+        # Rebuild DJ manager with new vecs
+        if _dj:
+            _dj = DJManager(
+                vecs=_vecs, path_index=_path_index, all_paths=_all_paths,
+                scorer=_scorer, track_meta=_track_meta, recent_ring=_recent_ring,
+                find_seed=_find_seed, build_payload=_build_track_payload,
+                log_play=_log_play, explore_cands=_explore_candidates,
+            )
+        _ready = True
+        return jsonify({'ok': True, 'message': f'✓ Reloaded {len(paths)} tracks'})
     return jsonify({'ok': False, 'message': f'Unknown action: {action}'}), 400
 
 
@@ -729,6 +789,10 @@ _ADMIN_HTML = """<!DOCTYPE html>
       <div class="action-row">
         <button class="btn-action" onclick="doAction('refresh_scorer')">Refresh scorer cache</button>
         <span class="action-desc">Force re-read of plays.db into the in-memory behavioral model without restarting the server.</span>
+      </div>
+      <div class="action-row">
+        <button class="btn-action" onclick="doAction('reload_embeddings')">Reload embeddings</button>
+        <span class="action-desc">Re-read the pickle file to pick new tracks without restarting the container. Validates before applying.</span>
       </div>
       <div id="action-log"></div>
     </div>
@@ -875,4 +939,7 @@ setInterval(load, 30000);
 
 if __name__ == '__main__':
     _startup()
+    if not _ready:
+        print("[startup] ABORT: embeddings not loaded — exiting")
+        sys.exit(1)
     app.run(host=API_HOST, port=API_PORT, debug=False, threaded=True)

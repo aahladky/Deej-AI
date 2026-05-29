@@ -14,6 +14,7 @@ Run:
     python deejay_api.py
 """
 
+import json
 import math
 import os
 import pickle
@@ -659,6 +660,194 @@ def admin_action():
         _ready = True
         return jsonify({'ok': True, 'message': f'✓ Reloaded {len(paths)} tracks'})
     return jsonify({'ok': False, 'message': f'Unknown action: {action}'}), 400
+
+
+NAVIDROME_URL = os.environ.get('DEEJAY_NAVIDROME_URL', 'http://192.168.0.29:4533')
+INBOX_DIR     = os.environ.get('DEEJAY_INBOX_DIR',  r'E:\Media\MusicInbox')
+PENDING_DIR   = os.environ.get('DEEJAY_PENDING_DIR', r'E:\Media\MusicPendingReview')
+
+@app.route('/api/health/all')
+def health_all():
+    """Aggregate health check for the entire ecosystem."""
+    import urllib.request
+    import datetime
+
+    checks = {}
+
+    # 1. API / Pickle
+    pickle_mtime = None
+    pickle_age_hours = None
+    try:
+        if os.path.exists(PICKLE_PATH):
+            mtime = os.path.getmtime(PICKLE_PATH)
+            pickle_mtime = datetime.datetime.fromtimestamp(mtime).isoformat()
+            pickle_age_hours = round((time.time() - mtime) / 3600, 1)
+    except Exception:
+        pass
+
+    checks['api'] = {
+        'status': 'ok' if _ready else 'error',
+        'tracks': len(_all_paths),
+        'pickle_mtime': pickle_mtime,
+        'pickle_age_hours': pickle_age_hours,
+    }
+
+    # 2. Navidrome
+    try:
+        req = urllib.request.Request(f'{NAVIDROME_URL}/api/ping', method='GET')
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            nav_data = json.loads(resp.read())
+            checks['navidrome'] = {
+                'status': 'ok' if nav_data.get('status') == 'ok' else 'error',
+                'url': NAVIDROME_URL,
+            }
+    except Exception as e:
+        checks['navidrome'] = {'status': 'error', 'url': NAVIDROME_URL, 'error': str(e)}
+
+    # 3. plays.db
+    try:
+        if os.path.exists(DB_PATH):
+            db_mtime = datetime.datetime.fromtimestamp(os.path.getmtime(DB_PATH)).isoformat()
+            con = sqlite3.connect(DB_PATH)
+            row = con.execute('SELECT COUNT(*), MAX(started_at) FROM plays').fetchone()
+            con.close()
+            checks['plays_db'] = {
+                'status': 'ok',
+                'total_plays': row[0],
+                'last_play_ts': datetime.datetime.fromtimestamp(row[1]).isoformat() if row[1] else None,
+                'last_modified': db_mtime,
+            }
+        else:
+            checks['plays_db'] = {'status': 'error', 'error': 'file not found'}
+    except Exception as e:
+        checks['plays_db'] = {'status': 'error', 'error': str(e)}
+
+    # 4. Inbox (new music waiting)
+    try:
+        if os.path.isdir(INBOX_DIR):
+            inbox_files = [f for f in os.listdir(INBOX_DIR) if os.path.isfile(os.path.join(INBOX_DIR, f))]
+            checks['inbox'] = {'status': 'ok', 'pending': len(inbox_files)}
+        else:
+            checks['inbox'] = {'status': 'ok', 'pending': 0, 'note': 'directory not found'}
+    except Exception as e:
+        checks['inbox'] = {'status': 'error', 'error': str(e)}
+
+    # 5. Pending review
+    try:
+        if os.path.isdir(PENDING_DIR):
+            pending_files = [f for f in os.listdir(PENDING_DIR) if os.path.isfile(os.path.join(PENDING_DIR, f))]
+            checks['pending_review'] = {'status': 'ok', 'count': len(pending_files)}
+        else:
+            checks['pending_review'] = {'status': 'ok', 'count': 0, 'note': 'directory not found'}
+    except Exception as e:
+        checks['pending_review'] = {'status': 'error', 'error': str(e)}
+
+    # Overall status
+    all_ok = all(c.get('status') == 'ok' for c in checks.values())
+    return jsonify({'overall': 'ok' if all_ok else 'degraded', 'checks': checks})
+
+
+@app.route('/admin/health')
+def admin_health_ui():
+    return _HEALTH_HTML
+
+
+_HEALTH_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeejAI · System Health</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --accent: #6c8ef7; --green: #4caf82; --red: #e05c5c; --yellow: #d4a843;
+    --text: #e2e4ee; --muted: #7b7f96;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 17px; font-weight: 600; color: var(--accent); }
+  header .nav { margin-left: auto; display: flex; gap: 12px; }
+  header .nav a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header .nav a:hover { color: var(--accent); }
+  #overall { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  #overall.ok { background: rgba(76,175,130,0.2); color: var(--green); }
+  #overall.degraded { background: rgba(212,168,67,0.2); color: var(--yellow); }
+  #overall.error { background: rgba(224,92,92,0.2); color: var(--red); }
+  main { padding: 24px; max-width: 900px; display: grid; gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 18px 20px; display: grid; grid-template-columns: 100px 1fr auto; align-items: center; gap: 16px; }
+  .card .label { font-size: 13px; font-weight: 600; }
+  .card .details { font-size: 12px; color: var(--muted); }
+  .card .details span { margin-right: 16px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .dot.ok { background: var(--green); }
+  .dot.error { background: var(--red); }
+  .dot.warn { background: var(--yellow); }
+  .footer { margin-top: 24px; font-size: 11px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>System Health</h1>
+  <span id="overall">loading…</span>
+  <div class="nav">
+    <a href="/admin">Dashboard</a>
+    <a href="/api/health/all">Raw JSON</a>
+  </div>
+</header>
+<main id="cards"></main>
+<div class="footer">Auto-refreshes every 30s</div>
+<script>
+const LABELS = {
+  api:           'DeejAI API',
+  navidrome:     'Navidrome',
+  plays_db:      'Plays DB',
+  inbox:         'Inbox',
+  pending_review:'Pending Review',
+};
+
+function fmt(key, c) {
+  const parts = [];
+  if (c.tracks !== undefined)        parts.push(`<span>${c.tracks.toLocaleString()} tracks</span>`);
+  if (c.pickle_age_hours !== null)   parts.push(`<span>pickle: ${c.pickle_age_hours}h old</span>`);
+  if (c.total_plays !== undefined)   parts.push(`<span>${c.total_plays.toLocaleString()} plays</span>`);
+  if (c.last_play_ts)                parts.push(`<span>last: ${c.last_play_ts.split('T')[0]}</span>`);
+  if (c.pending !== undefined)       parts.push(`<span>${c.pending} files</span>`);
+  if (c.count !== undefined)         parts.push(`<span>${c.count} tracks</span>`);
+  if (c.url)                         parts.push(`<span>${c.url}</span>`);
+  if (c.error)                       parts.push(`<span style="color:var(--red)">${c.error}</span>`);
+  return parts.join('');
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/health/all');
+    const d = await r.json();
+    const ov = document.getElementById('overall');
+    ov.textContent = d.overall;
+    ov.className = d.overall;
+
+    const cards = document.getElementById('cards');
+    cards.innerHTML = Object.entries(d.checks).map(([k, c]) => `
+      <div class="card">
+        <div class="label">${LABELS[k] || k}</div>
+        <div class="details">${fmt(k, c)}</div>
+        <div class="dot ${c.status}"></div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('overall').textContent = 'error';
+    document.getElementById('overall').className = 'error';
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>"""
 
 
 @app.route('/admin')

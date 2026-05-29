@@ -23,10 +23,19 @@ services:
       - type: bind
         source: C:\Dev\DeeJAI\radio
         target: /data/radio
+      - type: bind
+        source: E:\Media\MusicPendingReview
+        target: /data/pending-review
+      - type: bind
+        source: C:\Dev\import_pipeline
+        target: /data/import_pipeline
+        read_only: true
     environment:
       DEEJAY_PICKLE_PATH:  /data/pickles/mp3tovecs/mp3tovecs.p
       DEEJAY_DB_PATH:      /data/radio/plays.db
       DEEJAY_LIBRARY_ROOT: /data/music
+      DEEJAY_PENDING_DIR:  /data/pending-review
+      DEEJAY_NAVIDROME_URL: http://192.168.0.29:4533
       DEEJAY_API_KEY:      ${DEEJAY_API_KEY}
     networks:
       - deejay-net

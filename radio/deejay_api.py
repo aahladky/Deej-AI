@@ -20,6 +20,7 @@ import os
 import pickle
 import random
 import re
+import shutil
 import sqlite3
 import sys
 import time
@@ -845,6 +846,335 @@ async function load() {
 }
 load();
 setInterval(load, 30000);
+</script>
+</body>
+</html>"""
+
+
+# ── Review Dashboard ────────────────────────────────────────────────────────
+
+@app.route('/api/admin/review')
+def review_list():
+    """List pending tracks awaiting review."""
+    if not os.path.isdir(PENDING_DIR):
+        return jsonify({'pending': [], 'count': 0})
+
+    files = []
+    for f in sorted(os.listdir(PENDING_DIR)):
+        fp = os.path.join(PENDING_DIR, f)
+        if not os.path.isfile(fp):
+            continue
+        stat = os.stat(fp)
+        # Derive metadata from path
+        meta = _path_meta(f)
+        files.append({
+            'filename': f,
+            'size_mb': round(stat.st_size / 1048576, 1),
+            'added': time.strftime('%Y-%m-%d %H:%M', time.localtime(stat.st_mtime)),
+            'artist': meta['artist'],
+            'title': meta['title'],
+            'album': meta['album'],
+        })
+
+    return jsonify({'pending': files, 'count': len(files)})
+
+
+@app.route('/api/admin/review/confirm', methods=['POST'])
+def review_confirm():
+    """Confirm a pending track — move to library and trigger reload."""
+    body = request.get_json(force=True) or {}
+    filename = body.get('filename', '').strip()
+    if not filename:
+        return jsonify({'error': 'filename required'}), 400
+
+    src = os.path.join(PENDING_DIR, filename)
+    if not os.path.isfile(src):
+        return jsonify({'error': f'not found: {filename}'}), 404
+
+    # Derive destination from metadata
+    meta = _path_meta(filename)
+    artist_dir = os.path.join(LIBRARY_ROOT, meta['artist']) if meta['artist'] else LIBRARY_ROOT
+    album_dir = os.path.join(artist_dir, meta['album']) if meta['album'] else artist_dir
+    os.makedirs(album_dir, exist_ok=True)
+
+    dest = os.path.join(album_dir, filename)
+    if os.path.exists(dest):
+        return jsonify({'error': f'already exists: {dest}'}), 409
+
+    shutil.move(src, dest)
+
+    # Add to track_meta.json
+    abs_path = dest
+    _track_meta[abs_path] = {'artist': meta['artist'], 'title': meta['title'], 'album': meta['album']}
+    key = (_normalize(meta['artist']), _normalize(meta['title']))
+    if key not in _tag_index:
+        _tag_index[key] = abs_path
+
+    # Save updated track_meta.json
+    try:
+        meta_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'track_meta.json')
+        import json as _json
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            _json.dump(_track_meta, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"[review] warning: failed to update track_meta.json: {e}")
+
+    return jsonify({'ok': True, 'message': f'✓ Confirmed: {filename}', 'dest': dest})
+
+
+@app.route('/api/admin/review/reject', methods=['POST'])
+def review_reject():
+    """Reject a pending track — delete and log."""
+    body = request.get_json(force=True) or {}
+    filename = body.get('filename', '').strip()
+    reason = body.get('reason', '').strip()
+    if not filename:
+        return jsonify({'error': 'filename required'}), 400
+
+    src = os.path.join(PENDING_DIR, filename)
+    if not os.path.isfile(src):
+        return jsonify({'error': f'not found: {filename}'}), 404
+
+    os.remove(src)
+
+    # Log rejection
+    try:
+        log_path = os.path.join(PENDING_DIR, 'rejection_log.jsonl')
+        import json as _json
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(_json.dumps({
+                'filename': filename,
+                'reason': reason,
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            }) + '\n')
+    except Exception:
+        pass
+
+    return jsonify({'ok': True, 'message': f'✓ Rejected: {filename}'})
+
+
+@app.route('/admin/review')
+def review_ui():
+    return _REVIEW_HTML
+
+
+_REVIEW_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeejAI · Review Queue</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --accent: #6c8ef7; --green: #4caf82; --red: #e05c5c; --yellow: #d4a843;
+    --text: #e2e4ee; --muted: #7b7f96;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 17px; font-weight: 600; color: var(--accent); }
+  header .nav { margin-left: auto; display: flex; gap: 12px; }
+  header .nav a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header .nav a:hover { color: var(--accent); }
+  main { padding: 24px; max-width: 1000px; }
+  .count { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .empty { color: var(--muted); font-style: italic; padding: 40px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase;
+       letter-spacing: .05em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  tr:hover { background: rgba(108,142,247,0.05); }
+  .btn { border: none; padding: 5px 12px; border-radius: 5px; cursor: pointer;
+         font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .btn-confirm { background: rgba(76,175,130,0.2); color: var(--green); }
+  .btn-reject { background: rgba(224,92,92,0.2); color: var(--red); }
+  .btn:hover { opacity: 0.8; }
+  #msg { font-size: 12px; margin-top: 12px; min-height: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Review Queue</h1>
+  <div class="nav">
+    <a href="/admin">Dashboard</a>
+    <a href="/admin/health">Health</a>
+  </div>
+</header>
+<main>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+  <div id="msg"></div>
+</main>
+<script>
+async function load() {
+  const r = await fetch('/api/admin/review');
+  const d = await r.json();
+  document.getElementById('count').textContent = d.count + ' tracks pending review';
+  const list = document.getElementById('list');
+  if (d.count === 0) { list.innerHTML = '<div class="empty">No tracks pending review</div>'; return; }
+  list.innerHTML = '<table><tr><th>File</th><th>Artist</th><th>Title</th><th>Size</th><th>Added</th><th>Actions</th></tr>'
+    + d.pending.map(f => `<tr>
+      <td>${esc(f.filename)}</td><td>${esc(f.artist)}</td><td>${esc(f.title)}</td>
+      <td>${f.size_mb} MB</td><td>${f.added}</td>
+      <td>
+        <button class="btn btn-confirm" onclick="doAction('confirm','${esc(f.filename)}')">Confirm</button>
+        <button class="btn btn-reject" onclick="doAction('reject','${esc(f.filename)}')">Reject</button>
+      </td>
+    </tr>`).join('') + '</table>';
+}
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+async function doAction(action, filename) {
+  const msg = document.getElementById('msg');
+  msg.textContent = 'working…';
+  const r = await fetch('/api/admin/review/' + action, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({filename})
+  });
+  const d = await r.json();
+  msg.textContent = d.message || d.error;
+  msg.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+  load();
+}
+load();
+</script>
+</body>
+</html>"""
+
+
+# ── Genre Dashboard ─────────────────────────────────────────────────────────
+
+@app.route('/api/admin/genres')
+def genre_stats():
+    """Genre distribution from track_meta.json."""
+    genre_counts = {}
+    for meta in _track_meta.values():
+        genre = (meta.get('genre') or 'Unknown').strip() or 'Unknown'
+        genre_counts[genre] = genre_counts.get(genre, 0) + 1
+
+    # Sort by count descending
+    sorted_genres = sorted(genre_counts.items(), key=lambda x: -x[1])
+    total = sum(genre_counts.values())
+
+    return jsonify({
+        'genres': [{'name': g, 'count': c, 'pct': round(100 * c / total, 1) if total else 0}
+                   for g, c in sorted_genres],
+        'total': total,
+        'unique': len(genre_counts),
+    })
+
+
+@app.route('/api/admin/genres/normalize', methods=['POST'])
+def genre_normalize():
+    """Apply genre normalization using the pipeline's genre_normalizer."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'import_pipeline'))
+        from genre_normalizer import normalize_genre, load_mappings
+
+        mappings = load_mappings()
+        changed = 0
+        for path, meta in _track_meta.items():
+            old_genre = (meta.get('genre') or '').strip()
+            if not old_genre:
+                continue
+            new_genre = normalize_genre(old_genre, mappings)
+            if new_genre != old_genre:
+                meta['genre'] = new_genre
+                changed += 1
+
+        if changed > 0:
+            meta_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'track_meta.json')
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(_track_meta, f, ensure_ascii=False, indent=1)
+
+        return jsonify({'ok': True, 'message': f'✓ Normalized {changed} tracks', 'changed': changed})
+    except ImportError as e:
+        return jsonify({'ok': False, 'error': f'genre_normalizer not available: {e}'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/admin/genres')
+def genre_ui():
+    return _GENRE_HTML
+
+
+_GENRE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeejAI · Genre Distribution</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+    --accent: #6c8ef7; --green: #4caf82; --red: #e05c5c; --yellow: #d4a843;
+    --text: #e2e4ee; --muted: #7b7f96;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 17px; font-weight: 600; color: var(--accent); }
+  header .nav { margin-left: auto; display: flex; gap: 12px; }
+  header .nav a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header .nav a:hover { color: var(--accent); }
+  main { padding: 24px; max-width: 900px; }
+  .summary { display: flex; gap: 24px; margin-bottom: 20px; font-size: 13px; color: var(--muted); }
+  .summary b { color: var(--accent); }
+  .bar-row { display: grid; grid-template-columns: 160px 1fr 60px; align-items: center; gap: 12px;
+             padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .bar-row .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-bg { height: 18px; background: var(--surface); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.5s; }
+  .bar-row .count { font-size: 12px; color: var(--muted); text-align: right; }
+  .btn { border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer;
+         font-size: 13px; font-weight: 600; margin-top: 16px; }
+  .btn-normalize { background: var(--accent); color: #fff; }
+  .btn:hover { opacity: .85; }
+  #msg { font-size: 12px; margin-top: 12px; min-height: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Genre Distribution</h1>
+  <div class="nav">
+    <a href="/admin">Dashboard</a>
+    <a href="/admin/health">Health</a>
+  </div>
+</header>
+<main>
+  <div class="summary" id="summary"></div>
+  <div id="bars"></div>
+  <button class="btn btn-normalize" onclick="normalize()">Normalize Genres</button>
+  <div id="msg"></div>
+</main>
+<script>
+async function load() {
+  const r = await fetch('/api/admin/genres');
+  const d = await r.json();
+  document.getElementById('summary').innerHTML =
+    `<span><b>${d.total.toLocaleString()}</b> tracks</span><span><b>${d.unique}</b> unique genres</span>`;
+  const max = d.genres[0]?.count || 1;
+  document.getElementById('bars').innerHTML = d.genres.map(g => `
+    <div class="bar-row">
+      <div class="name" title="${g.name}">${g.name}</div>
+      <div class="bar-bg"><div class="bar-fill" style="width:${(g.count/max*100).toFixed(1)}%"></div></div>
+      <div class="count">${g.count} (${g.pct}%)</div>
+    </div>
+  `).join('');
+}
+async function normalize() {
+  const msg = document.getElementById('msg');
+  msg.textContent = 'normalizing…';
+  const r = await fetch('/api/admin/genres/normalize', {method:'POST'});
+  const d = await r.json();
+  msg.textContent = d.message || d.error;
+  msg.style.color = d.ok ? 'var(--green)' : 'var(--red)';
+  if (d.ok) load();
+}
+load();
 </script>
 </body>
 </html>"""
